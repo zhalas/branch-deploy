@@ -9991,83 +9991,7 @@ async function reactEmote(reaction, context, octokit) {
 // EXTERNAL MODULE: ./node_modules/dedent-js/lib/index.js
 var lib = __nccwpck_require__(3159);
 var lib_default = /*#__PURE__*/__nccwpck_require__.n(lib);
-;// CONCATENATED MODULE: ./src/functions/action-status.js
-// Default failure reaction
-const thumbsDown = '-1'
-// Default success reaction
-const rocket = 'rocket'
-// Alt success reaction
-const thumbsUp = '+1'
-
-// Helper function to add a status update for the action that is running a branch deployment
-// It also updates the original comment with a reaction depending on the status of the deployment
-// :param context: The context of the action
-// :param octokit: The octokit object
-// :param reactionId: The id of the original reaction added to our trigger comment (Integer)
-// :param message: The message to be added to the action status (String)
-// :param success: Boolean indicating whether the deployment was successful (Boolean)
-// :param altSuccessReaction: Boolean indicating whether to use the alternate success reaction (Boolean)
-// :returns: Nothing
-async function actionStatus(
-  context,
-  octokit,
-  reactionId,
-  message,
-  success,
-  altSuccessReaction
-) {
-  // check if message is null or empty
-  if (!message || message.length === 0) {
-    const log_url = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`
-    message = 'Unknown error, [check logs](' + log_url + ') for more details.'
-  }
-
-  // add a comment to the issue with the message
-  await octokit.rest.issues.createComment({
-    ...context.repo,
-    issue_number: context.issue.number,
-    body: message
-  })
-
-  // Select the reaction to add to the issue_comment
-  var reaction
-  if (success) {
-    if (altSuccessReaction) {
-      reaction = thumbsUp
-    } else {
-      reaction = rocket
-    }
-  } else {
-    reaction = thumbsDown
-  }
-
-  // add a reaction to the issue_comment to indicate success or failure
-  await octokit.rest.reactions.createForIssueComment({
-    ...context.repo,
-    comment_id: context.payload.comment.id,
-    content: reaction
-  })
-
-  // remove the initial reaction on the IssueOp comment that triggered this action
-  await octokit.rest.reactions.deleteForIssueComment({
-    ...context.repo,
-    comment_id: context.payload.comment.id,
-    reaction_id: reactionId
-  })
-}
-
-;// CONCATENATED MODULE: ./src/functions/lock-metadata.js
-const LOCK_METADATA = {
-  lockInfoFlags: ['--info', '--i', '-i', '--details', '--d', '-d'],
-  lockBranchSuffix: 'branch-deploy-lock',
-  globalLockBranch: 'global-branch-deploy-lock',
-  lockCommitMsg: 'lock [skip ci]',
-  lockFile: 'lock.json'
-}
-
 ;// CONCATENATED MODULE: ./src/functions/environment-targets.js
-
-
 
 
 
@@ -10150,81 +10074,6 @@ async function onDeploymentChecks(
   return false
 }
 
-// Helper function to that does environment checks specific to lock/unlock commands
-// :param environment_targets_sanitized: The list of environment targets
-// :param body: The body of the comment
-// :param lock_trigger: The trigger used to initiate the lock command
-// :param unlock_trigger: The trigger used to initiate the unlock command
-// :param environment: The default environment from the Actions inputs
-// :returns: The environment target if found, false otherwise
-async function onLockChecks(
-  environment_targets_sanitized,
-  body,
-  lock_trigger,
-  unlock_trigger,
-  environment
-) {
-  // if the body contains the globalFlag, exit right away as environments are not relevant
-  const globalFlag = core.getInput('global_lock_flag').trim()
-  if (body.includes(globalFlag)) {
-    core.debug('Global lock flag found in environment target check')
-    return 'GLOBAL_REQUEST'
-  }
-
-  // remove any lock flags from the body
-  LOCK_METADATA.lockInfoFlags.forEach(flag => {
-    body = body.replace(flag, '').trim()
-  })
-
-  // remove the --reason <text> from the body if it exists
-  if (body.includes('--reason')) {
-    core.debug(
-      `'--reason' found in comment body: ${body} - attempting to remove for environment checks`
-    )
-    body = body.split('--reason')[0]
-    core.debug(`comment body after '--reason' removal: ${body}`)
-  }
-
-  // Get the lock info alias from the action inputs
-  const lockInfoAlias = core.getInput('lock_info_alias')
-
-  // if the body matches the lock trigger exactly, just use the default environment
-  if (body.trim() === lock_trigger.trim()) {
-    core.debug('Using default environment for lock request')
-    return environment
-  }
-
-  // if the body matches the unlock trigger exactly, just use the default environment
-  if (body.trim() === unlock_trigger.trim()) {
-    core.debug('Using default environment for unlock request')
-    return environment
-  }
-
-  // if the body matches the lock info alias exactly, just use the default environment
-  if (body.trim() === lockInfoAlias.trim()) {
-    core.debug('Using default environment for lock info request')
-    return environment
-  }
-
-  // Loop through all the environment targets to see if an explicit target is being used
-  for (const target of environment_targets_sanitized) {
-    // If the body on a branch deploy contains the target
-    if (body.replace(lock_trigger, '').trim() === target) {
-      core.debug(`Found environment target for lock request: ${target}`)
-      return target
-    } else if (body.replace(unlock_trigger, '').trim() === target) {
-      core.debug(`Found environment target for unlock request: ${target}`)
-      return target
-    } else if (body.replace(lockInfoAlias, '').trim() === target) {
-      core.debug(`Found environment target for lock info request: ${target}`)
-      return target
-    }
-  }
-
-  // If we get here, then no valid environment target was found
-  return false
-}
-
 // Helper function to find the environment URL for a given environment target (if it exists)
 // :param environment: The environment target
 // :param environment_urls: The environment URLs from the action inputs
@@ -10287,7 +10136,6 @@ async function findEnvironmentUrl(environment, environment_urls) {
 // :param context: The context of the Action
 // :param octokit: The Octokit instance
 // :param reactionId: The ID of the initial comment reaction (Integer)
-// :param lockChecks: Whether or not this is a lock/unlock command (Boolean)
 // :param environment_urls: The environment URLs from the action inputs
 // :returns: An object containing the environment target and environment URL
 async function environmentTargets(
@@ -10299,7 +10147,6 @@ async function environmentTargets(
   context,
   octokit,
   reactionId,
-  lockChecks = false,
   environment_urls = null
 ) {
   // Get the environment targets from the action inputs
@@ -10313,24 +10160,22 @@ async function environmentTargets(
   // convert the environment targets into an array joined on ,
   const environment_targets_joined = environment_targets_sanitized.join(',')
 
-  // If lockChecks is set to true, this request is for either a lock/unlock command to check the body for an environment target
-  if (lockChecks === true) {
-    const environmentDetected = await onLockChecks(
-      environment_targets_sanitized,
-      body,
-      trigger,
-      alt_trigger,
-      environment
-    )
-    if (environmentDetected !== false) {
-      return {environment: environmentDetected, environmentUrl: null}
-    }
+  // If lockChecks is set to false, this request is for a branch deploy to check the body for an environment target
+  const environmentDetected = await onDeploymentChecks(
+    environment_targets_sanitized,
+    body,
+    trigger,
+    alt_trigger,
+    stable_branch,
+    environment
+  )
 
-    // If we get here, then no valid environment target was found
+  // If no environment target was found, let the user know via a comment and return false
+  if (environmentDetected === false) {
     const message = lib_default()(`
-    No matching environment target found. Please check your command and try again. You can read more about environment targets in the README of this Action.
+      No matching environment target found. Please check your command and try again. You can read more about environment targets in the README of this Action.
 
-    > The following environment targets are available: \`${environment_targets_joined}\`
+      > The following environment targets are available: \`${environment_targets_joined}\`
     `)
     core.warning(message)
     core.saveState('bypass', 'true')
@@ -10340,52 +10185,84 @@ async function environmentTargets(
       context,
       octokit,
       reactionId,
-      `### ⚠️ Cannot proceed with lock/unlock request\n\n${message}`
+      `### ⚠️ Cannot proceed with deployment\n\n${message}`
     )
-
     return {environment: false, environmentUrl: null}
   }
 
-  // If lockChecks is set to false, this request is for a branch deploy to check the body for an environment target
-  if (lockChecks === false) {
-    const environmentDetected = await onDeploymentChecks(
-      environment_targets_sanitized,
-      body,
-      trigger,
-      alt_trigger,
-      stable_branch,
-      environment
-    )
+  // Attempt to get the environment URL from the environment_urls input using the environment target as the key
+  const environmentUrl = await findEnvironmentUrl(
+    environmentDetected,
+    environment_urls
+  )
 
-    // If no environment target was found, let the user know via a comment and return false
-    if (environmentDetected === false) {
-      const message = lib_default()(`
-        No matching environment target found. Please check your command and try again. You can read more about environment targets in the README of this Action.
+  // Return the environment target
+  return {environment: environmentDetected, environmentUrl: environmentUrl}
+}
 
-        > The following environment targets are available: \`${environment_targets_joined}\`
-      `)
-      core.warning(message)
-      core.saveState('bypass', 'true')
+;// CONCATENATED MODULE: ./src/functions/action-status.js
+// Default failure reaction
+const thumbsDown = '-1'
+// Default success reaction
+const rocket = 'rocket'
+// Alt success reaction
+const thumbsUp = '+1'
 
-      // Return the action status as a failure
-      await actionStatus(
-        context,
-        octokit,
-        reactionId,
-        `### ⚠️ Cannot proceed with deployment\n\n${message}`
-      )
-      return {environment: false, environmentUrl: null}
-    }
-
-    // Attempt to get the environment URL from the environment_urls input using the environment target as the key
-    const environmentUrl = await findEnvironmentUrl(
-      environmentDetected,
-      environment_urls
-    )
-
-    // Return the environment target
-    return {environment: environmentDetected, environmentUrl: environmentUrl}
+// Helper function to add a status update for the action that is running a branch deployment
+// It also updates the original comment with a reaction depending on the status of the deployment
+// :param context: The context of the action
+// :param octokit: The octokit object
+// :param reactionId: The id of the original reaction added to our trigger comment (Integer)
+// :param message: The message to be added to the action status (String)
+// :param success: Boolean indicating whether the deployment was successful (Boolean)
+// :param altSuccessReaction: Boolean indicating whether to use the alternate success reaction (Boolean)
+// :returns: Nothing
+async function action_status_actionStatus(
+  context,
+  octokit,
+  reactionId,
+  message,
+  success,
+  altSuccessReaction
+) {
+  // check if message is null or empty
+  if (!message || message.length === 0) {
+    const log_url = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`
+    message = 'Unknown error, [check logs](' + log_url + ') for more details.'
   }
+
+  // add a comment to the issue with the message
+  await octokit.rest.issues.createComment({
+    ...context.repo,
+    issue_number: context.issue.number,
+    body: message
+  })
+
+  // Select the reaction to add to the issue_comment
+  var reaction
+  if (success) {
+    if (altSuccessReaction) {
+      reaction = thumbsUp
+    } else {
+      reaction = rocket
+    }
+  } else {
+    reaction = thumbsDown
+  }
+
+  // add a reaction to the issue_comment to indicate success or failure
+  await octokit.rest.reactions.createForIssueComment({
+    ...context.repo,
+    comment_id: context.payload.comment.id,
+    content: reaction
+  })
+
+  // remove the initial reaction on the IssueOp comment that triggered this action
+  await octokit.rest.reactions.deleteForIssueComment({
+    ...context.repo,
+    comment_id: context.payload.comment.id,
+    reaction_id: reactionId
+  })
 }
 
 ;// CONCATENATED MODULE: ./src/functions/deployment.js
@@ -11187,851 +11064,7 @@ async function prechecks(
   }
 }
 
-;// CONCATENATED MODULE: ./src/functions/time-diff.js
-// Helper function to calculate the time difference between two dates
-// :param firstDate: ISO 8601 formatted date string
-// :param secondDate: ISO 8601 formatted date string
-// :returns: A string in the following format: `${days}d:${hours}h:${minutes}m:${seconds}s`
-async function timeDiff(firstDate, secondDate) {
-  const firstDateFmt = new Date(firstDate)
-  const secondDateFmt = new Date(secondDate)
-
-  var seconds = Math.floor((secondDateFmt - firstDateFmt) / 1000)
-  var minutes = Math.floor(seconds / 60)
-  var hours = Math.floor(minutes / 60)
-  var days = Math.floor(hours / 24)
-
-  hours = hours - days * 24
-  minutes = minutes - days * 24 * 60 - hours * 60
-  seconds = seconds - days * 24 * 60 * 60 - hours * 60 * 60 - minutes * 60
-
-  return `${days}d:${hours}h:${minutes}m:${seconds}s`
-}
-
-;// CONCATENATED MODULE: ./src/functions/lock.js
-
-
-
-
-
-
-// Constants for the lock file
-const LOCK_BRANCH_SUFFIX = LOCK_METADATA.lockBranchSuffix
-const GLOBAL_LOCK_BRANCH = LOCK_METADATA.globalLockBranch
-const LOCK_FILE = LOCK_METADATA.lockFile
-const LOCK_COMMIT_MSG = LOCK_METADATA.lockCommitMsg
-
-// Helper function to construct the branch name
-// :param environment: The name of the environment
-// :param global: A bool indicating whether the lock is global or not
-// :returns: The branch name (String)
-async function constructBranchName(environment, global) {
-  // If the lock is global, return the global lock branch name
-  if (global === true) {
-    return GLOBAL_LOCK_BRANCH
-  }
-
-  // If the lock is not global, return the environment-specific lock branch name
-  return `${environment}-${LOCK_BRANCH_SUFFIX}`
-}
-
-// Helper function for creating a lock file for branch-deployment locks
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param ref: The branch which requested the lock / deployment
-// :param reason: The reason for the deployment lock
-// :param sticky: A bool indicating whether the lock is sticky or not (should persist forever)
-// :param environment: The environment to lock
-// :param global: A bool indicating whether the lock is global or not (should lock all environments)
-// :returns: The result of the createOrUpdateFileContents API call
-async function createLock(
-  octokit,
-  context,
-  ref,
-  reason,
-  sticky,
-  environment,
-  global,
-  reactionId
-) {
-  // Deconstruct the context to obtain the owner and repo
-  const {owner, repo} = context.repo
-
-  // Construct the file contents for the lock file
-  // Use the 'sticky' flag to determine whether the lock is sticky or not
-  // Sticky locks will persist forever
-  // Non-sticky locks will be removed if the branch that claimed the lock is deleted / merged
-  const lockData = {
-    reason: reason,
-    branch: ref,
-    created_at: new Date().toISOString(),
-    created_by: context.actor,
-    sticky: sticky,
-    environment: environment,
-    global: global,
-    unlock_command: await constructUnlockCommand(environment, global),
-    link: `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/pull/${context.issue.number}#issuecomment-${context.payload.comment.id}`
-  }
-
-  // Create the lock file
-  const result = await octokit.rest.repos.createOrUpdateFileContents({
-    ...context.repo,
-    path: LOCK_FILE,
-    message: LOCK_COMMIT_MSG,
-    content: Buffer.from(JSON.stringify(lockData)).toString('base64'),
-    branch: await constructBranchName(environment, global)
-  })
-
-  core.info(`global lock: ${global}`)
-
-  // Write a log message stating the lock has been claimed
-  core.info('deployment lock obtained')
-  // If the lock is sticky, always leave a comment
-  if (sticky) {
-    core.info('deployment lock is sticky')
-
-    // create a special comment section for global locks
-    let globalMsg = ''
-    let lockMsg
-    if (global === true) {
-      globalMsg =
-        'This is a **global** deploy lock - All environments are now locked'
-      lockMsg = '**globally**'
-      core.setOutput('global_lock_claimed', 'true')
-    } else {
-      lockMsg = `to the \`${environment}\` environment`
-    }
-
-    const comment = lib_default()(`
-    ### 🔒 Deployment Lock Claimed
-
-    ${globalMsg}
-    
-    You are now the only user that can trigger deployments ${lockMsg} until the deployment lock is removed
-
-    > This lock is _sticky_ and will persist until someone runs \`${lockData.unlock_command}\`
-    `)
-
-    // If the lock is sticky, this means that it was invoked with `.lock` and not from a deployment
-    // In this case, we update the actionStatus as we are about to exit
-    await actionStatus(context, octokit, reactionId, comment, true, true)
-  }
-
-  // Return the result of the lock file creation
-  return result
-}
-
-// Helper function to construct the unlock command
-// :param environment: The name of the environment
-// :param global: A bool indicating whether the lock is global or not
-// :returns: The unlock command (String)
-async function constructUnlockCommand(environment, global) {
-  // fetch the unlock trigger
-  const unlockTrigger = core.getInput('unlock_trigger').trim()
-  // fetch the global lock flag
-  const globalFlag = core.getInput('global_lock_flag').trim()
-
-  // If the lock is global, return the global lock branch name
-  if (global === true) {
-    return `${unlockTrigger} ${globalFlag}`
-  }
-
-  // If the lock is not global, return the environment-specific lock branch name
-  return `${unlockTrigger} ${environment}`
-}
-
-// Helper function to find the environment to be locked (if any - otherwise, the default)
-// This function will also check if the global lock flag was provided
-// If the global lock flag was provided, the environment will be set to null
-// :param context: The GitHub Actions event context
-// :returns: An object - EX: {environment: 'staging', global: false}
-async function findEnvironment(context) {
-  // Get the body of the comment
-  var body = context.payload.comment.body.trim()
-
-  // Get the global lock flag from the Action input
-  const globalFlag = core.getInput('global_lock_flag').trim()
-
-  // Check if the global lock flag was provided
-  if (body.includes(globalFlag) === true) {
-    return {
-      environment: null,
-      global: true
-    }
-  }
-
-  // also remove any lock flags from the body
-  LOCK_METADATA.lockInfoFlags.forEach(flag => {
-    body = body.replace(flag, '').trim()
-  })
-
-  // remove everything from the body after --reason
-  if (body.includes('--reason')) {
-    body = body.split('--reason')[0].trim()
-  }
-
-  // remove the lock command from the body
-  const lockTrigger = core.getInput('lock_trigger').trim()
-  body = body.replace(lockTrigger, '').trim()
-
-  // remove the lock info alias command from the body
-  const lockInfoAlias = core.getInput('lock_info_alias').trim()
-  body = body.replace(lockInfoAlias, '').trim()
-
-  // If the body is empty, return the default environment
-  if (body === '') {
-    return {
-      environment: core.getInput('environment').trim(),
-      global: false
-    }
-  } else {
-    // If there is anything left in the body, return that as the environment
-    return {
-      environment: body,
-      global: false
-    }
-  }
-}
-
-// Helper function to find a --reason flag in the comment body for a lock request
-// :param context: The GitHub Actions event context
-// :param sticky: A bool indicating whether the lock is sticky or not (should persist forever) - non-sticky locks are inherent from deployments
-// :returns: The reason for the lock request - either a string of text or null if no reason was provided
-async function findReason(context, sticky) {
-  // If if not sticky, return deployment as the reason
-  if (sticky === false) {
-    return 'deployment'
-  }
-
-  // Get the global lock flag from the Action input
-  const globalFlag = core.getInput('global_lock_flag').trim()
-
-  // Get the body of the comment and remove the global lock flag from the string
-  const body = context.payload.comment.body
-    .trim()
-    .replace(globalFlag, '')
-    .trim()
-
-  // Check if --reason was provided
-  if (body.includes('--reason') === false) {
-    // If no reason was provided, return null
-    return null
-  }
-
-  // Find the --reason flag in the body
-  const reasonRaw = body.split('--reason')[1]
-
-  // Remove whitespace
-  const reason = reasonRaw.trim()
-
-  // If the reason is empty, return null
-  if (reason === '') {
-    return null
-  }
-
-  // Return the reason for the lock request
-  core.debug(`reason: ${reason}`)
-  return reason
-}
-
-// Helper function to check if a given branch exists
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param branchName: The name of the branch to check
-// :return: true if the branch exists, false if not
-async function checkBranch(octokit, context, branchName) {
-  // Check if the lock branch already exists
-  try {
-    await octokit.rest.repos.getBranch({
-      ...context.repo,
-      branch: branchName
-    })
-
-    return true
-  } catch (error) {
-    // Create the lock branch if it doesn't exist
-    if (error.status === 404) {
-      return false
-    } else {
-      throw new Error(error)
-    }
-  }
-}
-
-// Helper function to create a lock branch
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param branchName: The name of the branch to create
-async function createBranch(octokit, context, branchName) {
-  // Determine the default branch for the repo
-  const repoData = await octokit.rest.repos.get({
-    ...context.repo
-  })
-
-  // Fetch the base branch's to use its SHA as the parent
-  const baseBranch = await octokit.rest.repos.getBranch({
-    ...context.repo,
-    branch: repoData.data.default_branch
-  })
-
-  // Create the lock branch
-  await octokit.rest.git.createRef({
-    ...context.repo,
-    ref: `refs/heads/${branchName}`,
-    sha: baseBranch.data.commit.sha
-  })
-
-  core.info(`Created lock branch: ${branchName}`)
-}
-
-// Helper function to check if a lock file exists and decodes it if it does
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param branchName: The name of the branch to check
-// :return: The lock file contents if it exists, false if not
-async function checkLockFile(octokit, context, branchName) {
-  // If the lock branch exists, check if a lock file exists
-  try {
-    // Get the lock file contents
-    const response = await octokit.rest.repos.getContent({
-      ...context.repo,
-      path: LOCK_FILE,
-      ref: branchName
-    })
-
-    // decode the file contents to json
-    const lockData = JSON.parse(
-      Buffer.from(response.data.content, 'base64').toString()
-    )
-
-    return lockData
-  } catch (error) {
-    // If the lock file doesn't exist, return false
-    if (error.status === 404) {
-      return false
-    }
-
-    // If some other error occurred, throw it
-    throw new Error(error)
-  }
-}
-
-// Helper function to check the lock owner
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param lockData: The lock file contents
-// :param sticky: A bool indicating whether the lock is sticky or not (should persist forever) - non-sticky locks are inherent from deployments
-// :param reactionId: The ID of the reaction that triggered the lock request
-// :return: true if the lock owner is the requestor, false if not
-async function checkLockOwner(octokit, context, lockData, sticky, reactionId) {
-  // If the requestor is the one who owns the lock, return 'owner'
-  if (lockData.created_by === context.actor) {
-    core.info(`${context.actor} is the owner of the lock`)
-
-    // If this is a .lock (sticky) command, update with actionStatus as we are about to exit
-    if (sticky) {
-      // Find the total time since the lock was created
-      const totalTime = await timeDiff(
-        lockData.created_at,
-        new Date().toISOString()
-      )
-
-      let lockMsg
-      if (lockData.global === true) {
-        lockMsg = 'global'
-      } else {
-        lockMsg = `\`${lockData.environment}\` environment`
-      }
-
-      const youOwnItComment = lib_default()(`
-        ### 🔒 Deployment Lock Information
-
-        __${context.actor}__, you are already the owner of the current ${lockMsg} deployment lock
-
-        The current lock has been active for \`${totalTime}\`
-
-        > If you need to release the lock, please comment \`${lockData.unlock_command}\`
-        `)
-
-      await actionStatus(
-        context,
-        octokit,
-        reactionId,
-        youOwnItComment,
-        true,
-        true
-      )
-    }
-
-    return true
-  }
-
-  // Deconstruct the context to obtain the owner and repo
-  const {owner, repo} = context.repo
-
-  // Find the total time since the lock was created
-  const totalTime = await timeDiff(
-    lockData.created_at,
-    new Date().toISOString()
-  )
-
-  // Set the header if it is sticky or not (aka a deployment or a direct invoke of .lock)
-  var header = ''
-  if (sticky === true) {
-    header = 'claim deployment lock'
-  } else if (sticky === false) {
-    header = 'proceed with deployment'
-  }
-
-  // dynamic reason text
-  let reasonText = ''
-  if (lockData.reason) {
-    reasonText = `- __Reason__: \`${lockData.reason}\``
-  }
-
-  // dynamic lock text
-  let lockText = ''
-  let environmentText = ''
-  var lockBranchForLink
-  if (lockData.global === true) {
-    lockText = lib_default()(
-      `the \`global\` deployment lock is currently claimed by __${lockData.created_by}__
-      
-      A \`global\` deployment lock prevents all other users from deploying to any environment except for the owner of the lock
-      `
-    )
-    lockBranchForLink = GLOBAL_LOCK_BRANCH
-  } else {
-    lockText = `the \`${lockData.environment}\` environment deployment lock is currently claimed by __${lockData.created_by}__`
-    environmentText = `- __Environment__: \`${lockData.environment}\``
-    lockBranchForLink = `${lockData.environment}-${LOCK_BRANCH_SUFFIX}`
-  }
-
-  // Construct the comment to add to the issue, alerting that the lock is already claimed
-  const comment = lib_default()(`
-  ### ⚠️ Cannot ${header}
-
-  Sorry __${context.actor}__, ${lockText}
-
-  #### Lock Details 🔒
-
-  ${reasonText}
-  ${environmentText}
-  - __Branch__: \`${lockData.branch}\`
-  - __Created At__: \`${lockData.created_at}\`
-  - __Created By__: \`${lockData.created_by}\`
-  - __Sticky__: \`${lockData.sticky}\`
-  - __Global__: \`${lockData.global}\`
-  - __Comment Link__: [click here](${lockData.link})
-  - __Lock Link__: [click here](${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/blob/${lockBranchForLink}/${LOCK_FILE})
-
-  The current lock has been active for \`${totalTime}\`
-
-  > If you need to release the lock, please comment \`${lockData.unlock_command}\`
-  `)
-
-  // Set the action status with the comment
-  await actionStatus(context, octokit, reactionId, comment)
-
-  // Set the bypass state to true so that the post run logic will not run
-  core.saveState('bypass', 'true')
-  core.setFailed(comment)
-
-  // Return false to indicate that the lock was not claimed
-  return false
-}
-
-// Helper function for claiming a deployment lock
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param ref: The branch which requested the lock / deployment
-// :param reactionId: The ID of the reaction to add to the issue comment (use if the lock is already claimed or if we claimed it with 'sticky')
-// :param sticky: A bool indicating whether the lock is sticky or not (should persist forever)
-// :param environment: The environment to lock (can be passed in if already known - otherwise we try and find it)
-// :param detailsOnly: A bool indicating whether to only return the details of the lock and not alter its state
-// :param postDeployStep: A bool indicating whether this function is being called from the post-deploy step
-// :returns: A lock repsponse object
-// Example:
-// {
-//   status: 'owner' | false | true | null | 'details-only',
-//   lockData: Object,
-//   globalFlag: String (--global for example),
-//   environment: String (production for example)
-//   global: Boolean (true if the request is for a global lock)
-// }
-// status: 'owner' - the lock was already claimed by the requestor
-// status: false - the lock was not claimed
-// status: true - the lock was claimed
-// status: null - no lock exists
-// status: 'details-only' - the lock details were returned, but the lock was not claimed
-async function lock(
-  octokit,
-  context,
-  ref,
-  reactionId,
-  sticky,
-  environment = null,
-  detailsOnly = false,
-  postDeployStep = false
-) {
-  var global
-
-  // find the global flag for returning
-  const globalFlag = core.getInput('global_lock_flag').trim()
-
-  // Attempt to obtain a reason from the context for the lock - either a string or null
-  const reason = await findReason(context, sticky)
-
-  // Find the environment from the context if it was not passed in
-  if (environment === null) {
-    const envObject = await findEnvironment(context)
-    environment = envObject.environment
-    global = envObject.global
-  } else {
-    // if the environment was passed in, we can assume it is not a global lock
-    global = false
-  }
-
-  // construct the branch name for the lock
-  const branchName = await constructBranchName(environment, global)
-
-  // lock debug info
-  core.debug(`detected lock env: ${environment}`)
-  core.debug(`detected lock global: ${global}`)
-  core.debug(`constructed lock branch: ${branchName}`)
-
-  // Before we can process THIS lock request, we must first check for a global lock
-  // If there is a global lock, we must check if the requestor is the owner of the lock
-  // We can only proceed here if there is NO global lock or if the requestor is the owner of the global lock
-  // We can just jump directly to checking the lock file
-  const globalLockData = await checkLockFile(
-    octokit,
-    context,
-    GLOBAL_LOCK_BRANCH
-  )
-
-  if (globalLockData === false && detailsOnly === true && global === true) {
-    // If the global lock file doesn't exist and this is a detailsOnly request for the global lock return null
-    return {
-      status: null,
-      lockData: null,
-      globalFlag,
-      environment,
-      global
-    }
-  } else if (
-    globalLockData &&
-    detailsOnly === true &&
-    postDeployStep === false
-  ) {
-    // If the lock file exists and this is a detailsOnly request for the global lock, return the lock data
-    return {
-      status: 'details-only',
-      lockData: globalLockData,
-      globalFlag,
-      environment,
-      global
-    }
-  }
-
-  // If the global lock exists, check if the requestor is the owner
-  if (globalLockData && postDeployStep === false) {
-    // Check if the requestor is the owner of the global lock
-    const globalLockOwner = await checkLockOwner(
-      octokit,
-      context,
-      globalLockData,
-      sticky,
-      reactionId
-    )
-    if (globalLockOwner === false) {
-      // If the requestor is not the owner of the global lock, return false
-      return {status: false, lockData: null, globalFlag, environment, global}
-    } else {
-      core.info('requestor is the owner of the global lock - continuing checks')
-    }
-  }
-
-  // Check if the lock branch exists
-  const branchExists = await checkBranch(octokit, context, branchName)
-
-  if (branchExists === false && detailsOnly === true) {
-    // If the lock branch doesn't exist and this is a detailsOnly request, return null
-    return {status: null, lockData: null, globalFlag, environment, global}
-  }
-
-  if (branchExists) {
-    // Check if the lock file exists
-    const lockData = await checkLockFile(octokit, context, branchName)
-
-    if (lockData === false && detailsOnly === true) {
-      // If the lock file doesn't exist and this is a detailsOnly request, return null
-      return {status: null, lockData: null, globalFlag, environment, global}
-    } else if (lockData && detailsOnly) {
-      // If the lock file exists and this is a detailsOnly request, return the lock data
-      return {
-        status: 'details-only',
-        lockData: lockData,
-        globalFlag,
-        environment,
-        global
-      }
-    }
-
-    if (lockData === false) {
-      // If the lock files doesn't exist, we can create it here
-      // Create the lock file
-      await createLock(
-        octokit,
-        context,
-        ref,
-        reason,
-        sticky,
-        environment,
-        global,
-        reactionId
-      )
-      return {status: true, lockData: null, globalFlag, environment, global}
-    } else {
-      // If the lock file exists, check if the requestor is the one who owns the lock
-      const lockOwner = await checkLockOwner(
-        octokit,
-        context,
-        lockData,
-        sticky,
-        reactionId
-      )
-      if (lockOwner === true) {
-        // If the requestor is the one who owns the lock, return 'owner'
-        return {
-          status: 'owner',
-          lockData: lockData,
-          globalFlag,
-          environment,
-          global
-        }
-      } else {
-        // If the requestor is not the one who owns the lock, return false
-        return {
-          status: false,
-          lockData: lockData,
-          globalFlag,
-          environment,
-          global
-        }
-      }
-    }
-  }
-
-  // If we get here, the lock branch does not exist and the detailsOnly flag is not set
-  // We can now safely create the lock branch and the lock file
-
-  // Create the lock branch if it doesn't exist
-  await createBranch(octokit, context, branchName)
-
-  // Create the lock file
-  await createLock(
-    octokit,
-    context,
-    ref,
-    reason,
-    sticky,
-    environment,
-    global,
-    reactionId
-  )
-  return {status: true, lockData: null, globalFlag, environment, global}
-}
-
-;// CONCATENATED MODULE: ./src/functions/unlock.js
-
-
-
-
-
-// Constants for the lock file
-const unlock_LOCK_BRANCH_SUFFIX = LOCK_METADATA.lockBranchSuffix
-const unlock_GLOBAL_LOCK_BRANCH = LOCK_METADATA.globalLockBranch
-
-// Helper function to find the environment to be unlocked (if any - otherwise, the default)
-// This function will also check if the global lock flag was provided
-// If the global lock flag was provided, the environment will be set to null
-// :param context: The GitHub Actions event context
-// :returns: An object - EX: {environment: 'staging', global: false}
-async function unlock_findEnvironment(context) {
-  // Get the body of the comment
-  var body = context.payload.comment.body.trim()
-
-  // remove the --reason <text> from the body if it exists
-  if (body.includes('--reason')) {
-    core.debug(
-      `'--reason' found in unlock comment body: ${body} - attempting to remove for environment checks`
-    )
-    body = body.split('--reason')[0]
-    core.debug(`comment body after '--reason' removal: ${body}`)
-  }
-
-  // Get the global lock flag from the Action input
-  const globalFlag = core.getInput('global_lock_flag').trim()
-
-  // Check if the global lock flag was provided
-  if (body.includes(globalFlag) === true) {
-    return {
-      environment: null,
-      global: true
-    }
-  }
-
-  // remove the unlock command from the body
-  const unlockTrigger = core.getInput('unlock_trigger').trim()
-  body = body.replace(unlockTrigger, '').trim()
-
-  // If the body is empty, return the default environment
-  if (body === '') {
-    return {
-      environment: core.getInput('environment').trim(),
-      global: false
-    }
-  } else {
-    // If there is anything left in the body, return that as the environment
-    return {
-      environment: body,
-      global: false
-    }
-  }
-}
-
-// Helper function for releasing a deployment lock
-// :param octokit: The octokit client
-// :param context: The GitHub Actions event context
-// :param reactionId: The ID of the reaction to add to the issue comment (only used if the lock is successfully released) (Integer)
-// :param environment: The environment to remove the lock from (String) - can be null and if so, the environment will be determined from the context
-// :param silent: A bool indicating whether to add a comment to the issue or not (Boolean)
-// :returns: true if the lock was successfully released, a string with some details if silent was used, false otherwise
-async function unlock(
-  octokit,
-  context,
-  reactionId,
-  environment = null,
-  silent = false
-) {
-  try {
-    var branchName
-    var global
-    // Find the environment from the context if it was not passed in
-    // If the environment is not being passed in, we can safely assuming that this function is not being called from a post-deploy Action and instead, it is being directly called from an IssueOps command
-    if (environment === null) {
-      const envObject = await unlock_findEnvironment(context)
-      environment = envObject.environment
-      global = envObject.global
-    } else {
-      // if the environment was passed in, we can assume it is not a global lock
-      global = false
-    }
-
-    // construct the branch name and success message text
-    var successText = ''
-    if (global === true) {
-      branchName = unlock_GLOBAL_LOCK_BRANCH
-      successText = '`global`'
-    } else {
-      branchName = `${environment}-${unlock_LOCK_BRANCH_SUFFIX}`
-      successText = `\`${environment}\``
-    }
-
-    // Delete the lock branch
-    const result = await octokit.rest.git.deleteRef({
-      ...context.repo,
-      ref: `heads/${branchName}`
-    })
-
-    // If the lock was successfully released, return true
-    if (result.status === 204) {
-      core.info(`successfully removed lock`)
-
-      // If silent, exit here
-      if (silent) {
-        core.debug('removing lock silently')
-        return 'removed lock - silent'
-      }
-
-      // If a global lock was successfully released, set the output
-      if (global === true) {
-        core.setOutput('global_lock_released', 'true')
-      }
-
-      // Construct the message to add to the issue comment
-      const comment = lib_default()(`
-      ### 🔓 Deployment Lock Removed
-
-      The ${successText} deployment lock has been successfully removed
-      `)
-
-      // Set the action status with the comment
-      await actionStatus(context, octokit, reactionId, comment, true, true)
-
-      // Return true
-      return true
-    } else {
-      // If the lock was not successfully released, return false and log the HTTP code
-      const comment = `failed to delete lock branch: ${branchName} - HTTP: ${result.status}`
-      core.info(comment)
-
-      // If silent, exit here
-      if (silent) {
-        core.debug('failed to delete lock (bad status code) - silent')
-        return 'failed to delete lock (bad status code) - silent'
-      }
-
-      await actionStatus(context, octokit, reactionId, comment, false)
-      return false
-    }
-  } catch (error) {
-    // The the error caught was a 422 - Reference does not exist, this is OK - It means the lock branch does not exist
-    if (error.status === 422 && error.message === 'Reference does not exist') {
-      // If silent, exit here
-      if (silent) {
-        core.debug('no deployment lock currently set - silent')
-        return 'no deployment lock currently set - silent'
-      }
-
-      // Format the comment
-      var noLockMsg
-      if (global === true) {
-        noLockMsg = '🔓 There is currently no `global` deployment lock set'
-      } else {
-        noLockMsg = `🔓 There is currently no \`${environment}\` deployment lock set`
-      }
-
-      // Leave a comment letting the user know there is no lock to release
-      await actionStatus(
-        context,
-        octokit,
-        reactionId,
-        noLockMsg,
-        true, // success
-        true // alt success reaction (ususally thumbs up)
-      )
-
-      // Return true since there is no lock to release
-      return true
-    }
-
-    // If silent, exit here
-    if (silent) {
-      throw new Error(error)
-    }
-
-    // Update the PR with the error
-    await actionStatus(context, octokit, reactionId, error.message, false)
-
-    throw new Error(error)
-  }
-}
-
 ;// CONCATENATED MODULE: ./src/functions/post-deploy.js
-
-
 
 
 
@@ -12154,7 +11187,7 @@ async function postDeploy(
   }
 
   // Update the action status to indicate the result of the deployment as a comment
-  await actionStatus(
+  await action_status_actionStatus(
     context,
     octokit,
     parseInt(reaction_id),
@@ -12172,34 +11205,6 @@ async function postDeploy(
 
   // If the deployment mode is noop, return here
   if (noop === 'true') {
-    // Obtain the lock data with detailsOnly set to true - ie we will not alter the lock
-    const lockResponse = await lock(
-      octokit,
-      context,
-      null, // ref
-      null, // reaction_id
-      false, // sticky
-      environment, // environment
-      true // detailsOnly set to true
-    )
-
-    // Obtain the lockData from the lock response
-    const lockData = lockResponse.lockData
-
-    // If the lock is sticky, we will not remove it
-    if (lockData.sticky) {
-      core.info('sticky lock detected, will not remove lock')
-    } else if (lockData.sticky === false) {
-      // Remove the lock - use silent mode
-      await unlock(
-        octokit,
-        context,
-        null, // reaction_id
-        environment, // environment
-        true // silent
-      )
-    }
-
     return 'success - noop'
   }
 
@@ -12213,35 +11218,6 @@ async function postDeploy(
     environment,
     environment_url // can be null
   )
-
-  // Obtain the lock data with detailsOnly set to true - ie we will not alter the lock
-  const lockResponse = await lock(
-    octokit,
-    context,
-    null, // ref
-    null, // reaction_id
-    false, // sticky
-    environment, // environment
-    true, // detailsOnly set to true
-    true // postDeployStep set to true - this means we will not exit early if a global lock exists
-  )
-
-  // Obtain the lockData from the lock response
-  const lockData = lockResponse.lockData
-
-  // If the lock is sticky, we will not remove it
-  if (lockData.sticky) {
-    core.info('sticky lock detected, will not remove lock')
-  } else if (lockData.sticky === false) {
-    // Remove the lock - use silent mode
-    await unlock(
-      octokit,
-      context,
-      null, // reaction_id
-      environment, // environment
-      true // silent
-    )
-  }
 
   // If the post deploy comment logic completes successfully, return
   return 'success'
@@ -12504,43 +11480,6 @@ async function help(octokit, context, reactionId, inputs) {
   }\` - Deploy this branch to the \`${
     inputs.environment
   }\` environment in noop mode
-  - \`${
-    inputs.lock_trigger
-  }\` - Obtain the deployment lock (will persist until the lock is released)
-  - \`${
-    inputs.lock_trigger
-  } --reason <text>\` - Obtain the deployment lock with a reason (will persist until the lock is released)
-  - \`${
-    inputs.lock_trigger
-  } <environment>\` - Obtain the deployment lock for the specified environment (will persist until the lock is released)
-  - \`${
-    inputs.lock_trigger
-  } <environment> --reason <text>\` - Obtain the deployment lock for the specified environment with a reason (will persist until the lock is released)
-  - \`${inputs.lock_trigger} ${
-    inputs.global_lock_flag
-  }\` - Obtain a global deployment lock (will persist until the lock is released) - Blocks all environments
-  - \`${inputs.lock_trigger} ${
-    inputs.global_lock_flag
-  } --reason <text>\` - Obtain a global deployment lock with a reason (will persist until the lock is released) - Blocks all environments
-  - \`${inputs.unlock_trigger}\` - Release the deployment lock (if one exists)
-  - \`${
-    inputs.unlock_trigger
-  } <environment>\` - Release the deployment lock for the specified environment (if one exists)
-  - \`${inputs.unlock_trigger} ${
-    inputs.global_lock_flag
-  }\` - Release the global deployment lock (if one exists)
-  - \`${
-    inputs.lock_trigger
-  } --details\` - Show information about the current deployment lock (if one exists)
-  - \`${
-    inputs.lock_trigger
-  } <environment> --details\` - Get information about the current deployment lock for the specified environment (if one exists)
-  - \`${inputs.lock_trigger} ${
-    inputs.global_lock_flag
-  } --details\` - Show information about the current global deployment lock (if one exists)
-  - \`${inputs.lock_info_alias}\` - Alias for \`${
-    inputs.lock_trigger
-  } --details\`
 
   ### 🌍 Environments
 
@@ -12575,18 +11514,6 @@ async function help(octokit, context, reactionId, inputs) {
     ',',
     '|'
   )}>\` - Deploy this branch to the specified environment (note: the \`to\` keyword is optional)
-  - \`${inputs.lock_trigger} <${inputs.environment_targets.replaceAll(
-    ',',
-    '|'
-  )}>\` - Obtain the deployment lock for the specified environment
-  - \`${inputs.unlock_trigger} <${inputs.environment_targets.replaceAll(
-    ',',
-    '|'
-  )}>\` - Release the deployment lock for the specified environment
-  - \`${inputs.lock_trigger} <${inputs.environment_targets.replaceAll(
-    ',',
-    '|'
-  )}> --details\` - Get information about the deployment lock for the specified environment
 
   ### ⚙️ Configuration
 
@@ -12619,7 +11546,7 @@ async function help(octokit, context, reactionId, inputs) {
   core.debug(comment)
 
   // Put the help comment on the pull request
-  await actionStatus(
+  await action_status_actionStatus(
     context,
     octokit,
     reactionId,
@@ -12630,9 +11557,6 @@ async function help(octokit, context, reactionId, inputs) {
 }
 
 ;// CONCATENATED MODULE: ./src/main.js
-
-
-
 
 
 
@@ -12661,13 +11585,9 @@ async function run() {
     var environment = core.getInput('environment', {required: true})
     const stable_branch = core.getInput('stable_branch')
     const noop_trigger = core.getInput('noop_trigger')
-    const lock_trigger = core.getInput('lock_trigger')
     const production_environment = core.getInput('production_environment')
     const environment_targets = core.getInput('environment_targets')
-    const unlock_trigger = core.getInput('unlock_trigger')
     const help_trigger = core.getInput('help_trigger')
-    const lock_info_alias = core.getInput('lock_info_alias')
-    const global_lock_flag = core.getInput('global_lock_flag')
     const update_branch = core.getInput('update_branch')
     const required_contexts = core.getInput('required_contexts')
     const allowForks = core.getInput('allow_forks') === 'true'
@@ -12706,25 +11626,12 @@ async function run() {
 
     // Check if the comment is a trigger and what type of trigger it is
     const isDeploy = await triggerCheck(prefixOnly, body, trigger)
-    const isLock = await triggerCheck(prefixOnly, body, lock_trigger)
-    const isUnlock = await triggerCheck(prefixOnly, body, unlock_trigger)
     const isHelp = await triggerCheck(prefixOnly, body, help_trigger)
-    const isLockInfoAlias = await triggerCheck(
-      prefixOnly,
-      body,
-      lock_info_alias
-    )
 
     // Loop through all the triggers and check if there are multiple triggers
     // If multiple triggers are activated, exit (this is not allowed)
     var multipleTriggers = false
-    for (const trigger of [
-      isDeploy,
-      isLock,
-      isUnlock,
-      isHelp,
-      isLockInfoAlias
-    ]) {
+    for (const trigger of [isDeploy, isHelp]) {
       if (trigger) {
         if (multipleTriggers) {
           core.saveState('bypass', 'true')
@@ -12739,7 +11646,7 @@ async function run() {
       }
     }
 
-    if (!isDeploy && !isLock && !isUnlock && !isHelp && !isLockInfoAlias) {
+    if (!isDeploy && !isHelp) {
       // If the comment does not activate any triggers, exit
       core.saveState('bypass', 'true')
       core.setOutput('triggered', 'false')
@@ -12747,14 +11654,8 @@ async function run() {
       return 'safe-exit'
     } else if (isDeploy) {
       core.setOutput('type', 'deploy')
-    } else if (isLock) {
-      core.setOutput('type', 'lock')
-    } else if (isUnlock) {
-      core.setOutput('type', 'unlock')
     } else if (isHelp) {
       core.setOutput('type', 'help')
-    } else if (isLockInfoAlias) {
-      core.setOutput('type', 'lock-info-alias')
     }
 
     // If we made it this far, the action has been triggered in one manner or another
@@ -12775,7 +11676,7 @@ async function run() {
       const validPermissionsRes = await validPermissions(octokit, github.context)
       // If the user doesn't have valid permissions, return an error
       if (validPermissionsRes !== true) {
-        await actionStatus(
+        await action_status_actionStatus(
           github.context,
           octokit,
           reactRes.data.id,
@@ -12795,13 +11696,9 @@ async function run() {
         environment: environment,
         stable_branch: stable_branch,
         noop_trigger: noop_trigger,
-        lock_trigger: lock_trigger,
         production_environment: production_environment,
         environment_targets: environment_targets,
-        unlock_trigger: unlock_trigger,
-        global_lock_flag: global_lock_flag,
         help_trigger: help_trigger,
-        lock_info_alias: lock_info_alias,
         update_branch: update_branch,
         required_contexts: required_contexts,
         allowForks: allowForks,
@@ -12816,193 +11713,6 @@ async function run() {
       return 'safe-exit'
     }
 
-    // If the command is a lock/unlock request
-    if (isLock || isUnlock || isLockInfoAlias) {
-      // Check to ensure the user has valid permissions
-      const validPermissionsRes = await validPermissions(octokit, github.context)
-      // If the user doesn't have valid permissions, return an error
-      if (validPermissionsRes !== true) {
-        await actionStatus(
-          github.context,
-          octokit,
-          reactRes.data.id,
-          validPermissionsRes
-        )
-        // Set the bypass state to true so that the post run logic will not run
-        core.saveState('bypass', 'true')
-        core.setFailed(validPermissionsRes)
-        return 'failure'
-      }
-
-      // Check if the environment being locked/unlocked is a valid environment
-      const lockEnvTargetCheckObj = await environmentTargets(
-        environment, // the default environment from the Actions inputs
-        body, // the body of the comment
-        lock_trigger,
-        unlock_trigger,
-        null, // the stable_branch is not used for lock/unlock
-        github.context, // the context object
-        octokit, // the octokit object
-        reactRes.data.id,
-        true // lockChecks set to true as this is for lock/unlock requests
-      )
-
-      // extract the environment target from the lockEnvTargetCheckObj
-      const lockEnvTargetCheck = lockEnvTargetCheckObj.environment
-
-      // If the environment targets are not valid, then exit
-      if (!lockEnvTargetCheck) {
-        core.debug('No valid environment targets found for lock/unlock request')
-        return 'safe-exit'
-      }
-
-      // If it is a lock or lock info releated request
-      if (isLock || isLockInfoAlias) {
-        // If the lock request is only for details
-        if (
-          LOCK_METADATA.lockInfoFlags.some(
-            substring => body.includes(substring) === true
-          ) ||
-          isLockInfoAlias === true
-        ) {
-          // Get the lock details from the lock file
-          const lockResponse = await lock(
-            octokit,
-            github.context,
-            null, // ref
-            reactRes.data.id,
-            null, // sticky
-            null, // environment (we will find this in the lock function)
-            true // details only flag
-          )
-          // extract values from the lock response
-          const lockData = lockResponse.lockData
-          const lockStatus = lockResponse.status
-
-          // If a lock was found
-          if (lockStatus !== null) {
-            // Find the total time since the lock was created
-            const totalTime = await timeDiff(
-              lockData.created_at,
-              new Date().toISOString()
-            )
-
-            // special comment for global deploy locks
-            let globalMsg = ''
-            let environmentMsg = `- __Environment__: \`${lockData.environment}\``
-            let lockBranchName = `${lockData.environment}-${LOCK_METADATA.lockBranchSuffix}`
-            if (lockData.global === true) {
-              globalMsg = lib_default()(`
-
-              This is a **global** deploy lock - All environments are currently locked
-
-              `)
-              environmentMsg = lib_default()(`
-              - __Environments__: \`all\`
-              - __Global__: \`true\`
-              `)
-              core.info('there is a global deployment lock on this repository')
-              lockBranchName = LOCK_METADATA.globalLockBranch
-            }
-
-            // Format the lock details message
-            const lockMessage = lib_default()(`
-            ### Lock Details 🔒
-
-            The deployment lock is currently claimed by __${lockData.created_by}__${globalMsg}
-
-            - __Reason__: \`${lockData.reason}\`
-            - __Branch__: \`${lockData.branch}\`
-            - __Created At__: \`${lockData.created_at}\`
-            - __Created By__: \`${lockData.created_by}\`
-            - __Sticky__: \`${lockData.sticky}\`
-            ${environmentMsg}
-            - __Comment Link__: [click here](${lockData.link})
-            - __Lock Link__: [click here](${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/blob/${lockBranchName}/${LOCK_METADATA.lockFile})
-
-            The current lock has been active for \`${totalTime}\`
-
-            > If you need to release the lock, please comment \`${lockData.unlock_command}\`
-            `)
-
-            // Update the issue comment with the lock details
-            await actionStatus(
-              github.context,
-              octokit,
-              reactRes.data.id,
-              lockMessage,
-              true,
-              true
-            )
-            core.info(
-              `the deployment lock is currently claimed by __${lockData.created_by}__`
-            )
-          } else if (lockStatus === null) {
-            // format the lock details message
-            var lockCommand
-            var lockTarget
-            if (lockResponse.global) {
-              lockTarget = 'global'
-              lockCommand = `${lock_trigger} ${lockResponse.globalFlag}`
-            } else {
-              lockTarget = lockResponse.environment
-              lockCommand = `${lock_trigger} ${lockTarget}`
-            }
-
-            const lockMessage = lib_default()(`
-            ### Lock Details 🔒
-
-            No active \`${lockTarget}\` deployment locks found for the \`${owner}/${repo}\` repository
-
-            > If you need to create a \`${lockTarget}\` lock, please comment \`${lockCommand}\`
-            `)
-
-            await actionStatus(
-              github.context,
-              octokit,
-              reactRes.data.id,
-              lockMessage,
-              true,
-              true
-            )
-            core.info('no active deployment locks found')
-          }
-
-          // Exit the action since we are done after obtaining only the lock details with --details
-          core.saveState('bypass', 'true')
-          return 'safe-exit'
-        }
-
-        // If the request is a lock request, attempt to claim the lock with a sticky request with the logic below
-
-        // Get the ref to use with the lock request
-        const pr = await octokit.rest.pulls.get({
-          ...github.context.repo,
-          pull_number: github.context.issue.number
-        })
-
-        // Send the lock request
-        await lock(
-          octokit,
-          github.context,
-          pr.data.head.ref,
-          reactRes.data.id,
-          true, // sticky
-          null, // environment (we will find this in the lock function)
-          false // details only flag
-        )
-        core.saveState('bypass', 'true')
-        return 'safe-exit'
-      }
-
-      // If the request is an unlock request, attempt to release the lock
-      if (isUnlock) {
-        await unlock(octokit, github.context, reactRes.data.id)
-        core.saveState('bypass', 'true')
-        return 'safe-exit'
-      }
-    }
-
     // Check if the default environment is being overwritten by an explicit environment
     const environmentObj = await environmentTargets(
       environment, // environment
@@ -13013,7 +11723,6 @@ async function run() {
       github.context, // context object
       octokit, // octokit object
       reactRes.data.id, // reaction id
-      false, // lockChecks set to false as this is for a deployment
       environment_urls // environment_urls action input
     )
 
@@ -13051,7 +11760,7 @@ async function run() {
 
     // If the prechecks failed, run the actionFailed function and return
     if (!precheckResults.status) {
-      await actionStatus(
+      await action_status_actionStatus(
         github.context,
         octokit,
         reactRes.data.id,
@@ -13061,21 +11770,6 @@ async function run() {
       core.saveState('bypass', 'true')
       core.setFailed(precheckResults.message)
       return 'failure'
-    }
-
-    // Aquire the branch-deploy lock for non-sticky requests
-    const lockResponse = await lock(
-      octokit,
-      github.context,
-      precheckResults.ref,
-      reactRes.data.id,
-      false, // sticky
-      environment
-    )
-
-    // If the lock request fails, exit the Action
-    if (lockResponse.status === false) {
-      return 'safe-exit'
     }
 
     // Add a comment to the PR letting the user know that a deployment has been started
@@ -13174,7 +11868,7 @@ async function run() {
 
         > Deployment will not continue. Please try again once this branch is up-to-date with the base branch
         `)
-      await actionStatus(github.context, octokit, reactRes.data.id, mergeMessage)
+      await action_status_actionStatus(github.context, octokit, reactRes.data.id, mergeMessage)
       core.warning(mergeMessage)
       // Enable bypass for the post deploy step since the deployment is not complete
       core.saveState('bypass', 'true')
